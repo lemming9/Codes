@@ -1,0 +1,346 @@
+--[[--------------------------------------------------------------------------------------------------------------]]
+--[[                                         SCRIPT MADE BY:                                                      ]]
+--[[                                       MAFI0SO (@caiomineblox1000)                                            ]]
+--[[--------------------------------------------------------------------------------------------------------------]]
+
+
+--[[---------------------------------------------------------------------------------------------------------------]]
+--[[                                             SERVICES                                                          ]]
+--[[---------------------------------------------------------------------------------------------------------------]]
+
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+--[[---------------------------------------------------------------------------------------------------------------]]
+--[[                                        CORE CONDITIONALS                                                      ]]
+--[[---------------------------------------------------------------------------------------------------------------]]
+
+local IsPlayerRunning = false
+local IsPlayerCrouched = false
+
+local CanPlayerRun = true
+local CanPlayerCrouch = true
+local CanPlayerJump = true
+
+--[[---------------------------------------------------------------------------------------------------------------]]
+--[[                                            KEY ASSETS                                                         ]]
+--[[---------------------------------------------------------------------------------------------------------------]]
+
+local PlayerCamera = workspace.CurrentCamera
+local Player = Players.LocalPlayer
+local Char = Player.Character
+
+local PlayerGui = Player:WaitForChild("PlayerGui")
+local KeyInterface = PlayerGui:WaitForChild("KeyInterface")
+local StaminaBar = KeyInterface:WaitForChild("StaminaBar")
+
+local StaminaCounter = StaminaBar:WaitForChild("Stamina")
+
+--[[---------------------------------------------------------------------------------------------------------------]]
+--[[                                         CONFIGURATIONS                                                        ]]
+--[[---------------------------------------------------------------------------------------------------------------]]
+
+local MinimalSpeedForRunning = 25
+local StaminaIncreaseSpeed = 15
+local StaminaDecreaseSpeed = 20
+local HumanoidJumpPower = 2.5
+local JumpCooldown = 1
+local HipNormalDistance = 0
+local HipCrouchDistance = -0.5
+local CrouchingSpeed = 8
+local RunningSpeed = 40
+local WalkingSpeed = 16
+local Stamina = 100
+local StartFOV = PlayerCamera.FieldOfView
+local EndFOV = StartFOV + 20
+
+--[[---------------------------------------------------------------------------------------------------------------]]
+--[[                                         IMPORTANT ASSETS                                                      ]]
+--[[---------------------------------------------------------------------------------------------------------------]]
+
+local C = Enum.KeyCode.C
+local LeftShift = Enum.KeyCode.LeftShift
+
+local RoundFinished = ReplicatedStorage:WaitForChild("RoundFinished")
+local CameraTweenInfo = TweenInfo.new(1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+local RunStartFOVTween = TweenService:Create(PlayerCamera, CameraTweenInfo, {FieldOfView = EndFOV})
+local RunEndFOVTween = TweenService:Create(PlayerCamera, CameraTweenInfo, {FieldOfView = StartFOV})
+
+local PlayCutsceneEvent = ReplicatedStorage:WaitForChild("PlayCutsceneEvent")
+local CutsceneFinished = ReplicatedStorage:WaitForChild("CutsceneFinished")
+
+--[[---------------------------------------------------------------------------------------------------------------]]
+--[[                                             ANIMATIONS                                                        ]]
+--[[---------------------------------------------------------------------------------------------------------------]]
+
+local PlaceholderAnim = ReplicatedStorage:WaitForChild("PlaceholderAnimations")
+
+local RunAnimation = PlaceholderAnim:WaitForChild("RunAnim")
+local MovingCrouchAnimation = PlaceholderAnim:WaitForChild("MovingCrouchAnim")
+
+--[[---------------------------------------------------------------------------------------------------------------]]
+--[[                                          HELPER FUNCTIONS                                                     ]]
+--[[---------------------------------------------------------------------------------------------------------------]]
+
+local getCurrentCharacter = function()
+	return Player.Character or Player.CharacterAdded:Wait()
+end
+
+local getAnimator = function()
+	local char = getCurrentCharacter()
+	local hum = char:WaitForChild("Humanoid", 5)
+	if hum then
+		return hum:WaitForChild("Animator", 5)
+	end
+	return nil
+end
+
+--[[---------------------------------------------------------------------------------------------------------------]]
+--[[                                             FUNCTIONS                                                         ]]
+--[[---------------------------------------------------------------------------------------------------------------]]
+
+local StartAnimation = function(animationInstance)
+	local animator = getAnimator()
+	if not animator then return end
+
+	for _, track in pairs(animator:GetPlayingAnimationTracks()) do
+		if track.Animation.AnimationId == animationInstance.AnimationId then
+			if not track.IsPlaying then track:Play() end
+			return track
+		end
+	end
+	
+	local animTrack = animator:LoadAnimation(animationInstance)
+	animTrack:Play()
+	return animTrack
+end
+
+local StopAnimation = function(animationInstance)
+	local animator = getAnimator()
+	if not animator then return end
+
+	for _, track in pairs(animator:GetPlayingAnimationTracks()) do 
+		if track.Animation.AnimationId == animationInstance.AnimationId then
+			track:Stop()
+		end
+	end
+end
+
+-- // Start running function //
+local RunningStart = function()
+	local Character = getCurrentCharacter()
+	local Humanoid = Character:FindFirstChild("Humanoid")
+	if not Humanoid then return end
+
+	if CanPlayerRun then
+		Humanoid.WalkSpeed = RunningSpeed
+		StartAnimation(RunAnimation)
+		RunEndFOVTween:Pause()
+		RunStartFOVTween:Play()
+		IsPlayerRunning = true
+		CanPlayerJump = false
+		CanPlayerCrouch = false
+	end
+end
+
+-- // Stop running function //
+local RunningEnd = function()
+	local Character = getCurrentCharacter()
+	local Humanoid = Character:FindFirstChild("Humanoid")
+	if not Humanoid then return end
+
+	if IsPlayerRunning then
+		IsPlayerRunning = false
+		Humanoid.WalkSpeed = WalkingSpeed
+		StopAnimation(RunAnimation)
+		RunStartFOVTween:Pause()
+		RunEndFOVTween:Play()
+		CanPlayerJump = true
+		CanPlayerCrouch = true
+	end
+end
+
+--// Jump function //
+local JumpRequest = function() 
+	local Character = getCurrentCharacter()
+	local Humanoid = Character:FindFirstChild("Humanoid")
+	if not Humanoid then return end
+
+	local HumanoidState = Humanoid:GetState()
+
+	if HumanoidState ~= Enum.HumanoidStateType.Freefall and CanPlayerJump and Stamina >= 10 then
+		CanPlayerJump = false
+		Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+		Stamina -= 10
+		task.wait(JumpCooldown)
+		CanPlayerJump = true
+	end
+end
+
+-- // Crouch function //
+local CrouchStart = function()
+	local Character = getCurrentCharacter()
+	local Humanoid = Character:FindFirstChild("Humanoid")
+	if not Humanoid then return end
+
+	if CanPlayerCrouch and not IsPlayerCrouched then
+		StartAnimation(MovingCrouchAnimation)
+		Humanoid.HipHeight = HipCrouchDistance
+		Humanoid.WalkSpeed = CrouchingSpeed
+
+		IsPlayerCrouched = true
+		CanPlayerRun = false
+		CanPlayerJump = false
+	end   
+end
+
+-- // Uncrouch function //
+local CrouchEnd = function()
+	local Character = getCurrentCharacter()
+	local Humanoid = Character:FindFirstChild("Humanoid")
+	if not Humanoid then return end
+
+	if CanPlayerCrouch and IsPlayerCrouched then
+		Humanoid.HipHeight = HipNormalDistance
+		Humanoid.WalkSpeed = WalkingSpeed
+		StopAnimation(MovingCrouchAnimation)
+
+		IsPlayerCrouched = false
+		CanPlayerJump = true
+		CanPlayerRun = true
+	end
+end
+
+--[[---------------------------------------------------------------------------------------------------------------]]
+--[[                                      CHARACTER INITIALIZATION                                                 ]]
+--[[---------------------------------------------------------------------------------------------------------------]]
+
+local setupCharacter = function(Character)
+	local Humanoid = Character:WaitForChild("Humanoid")
+
+	Humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
+	Humanoid.WalkSpeed = WalkingSpeed
+	Humanoid.HipHeight = HipNormalDistance
+
+	IsPlayerRunning = false
+	IsPlayerCrouched = false
+	CanPlayerRun = true
+	CanPlayerCrouch = true
+	CanPlayerJump = true
+end
+
+Player.CharacterAdded:Connect(setupCharacter)
+if Player.Character then
+	setupCharacter(Player.Character)
+end
+
+--[[---------------------------------------------------------------------------------------------------------------]]
+--[[                                      STAMINA VERIFICATION                                                     ]]
+--[[---------------------------------------------------------------------------------------------------------------]]
+
+task.spawn(function()
+	while true do
+		local deltaTime = RunService.Heartbeat:Wait() 
+
+		local HumRootPart:BasePart = Player.Character:FindFirstChild("HumanoidRootPart")
+
+		if HumRootPart then
+			local PlayerSpeed = HumRootPart.AssemblyLinearVelocity.Magnitude
+
+			if PlayerSpeed >= MinimalSpeedForRunning and Stamina > 0 then
+				Stamina -= (StaminaDecreaseSpeed * deltaTime)
+			else
+				if not IsPlayerRunning and Stamina < 100 then
+					Stamina += (StaminaIncreaseSpeed * deltaTime)
+				end
+			end
+
+			Stamina = math.clamp(Stamina, 0, 100)
+
+			StaminaCounter.Size = UDim2.new(Stamina / 100, 0, 1, 0)
+
+			if Stamina <= 0 then
+				RunningEnd()
+			end
+		end
+	end
+end)
+
+--[[---------------------------------------------------------------------------------------------------------------]]
+--[[                                         RBXScriptSignals (Events)                                             ]]
+--[[---------------------------------------------------------------------------------------------------------------]]
+
+UserInputService.InputBegan:Connect(function(Key, GameProcessed)
+	if GameProcessed then return end
+	
+	if Key.KeyCode == LeftShift then
+		if not IsPlayerRunning and CanPlayerRun then
+			warn(Player.Name .. " has started running!")
+			
+			RunningStart()
+		end
+	end
+	
+	if Key.KeyCode == C then
+		if not CanPlayerCrouch then return end
+		
+		if not IsPlayerCrouched then
+			warn(Player.Name .. " crouched!")
+			
+			CrouchStart()
+		elseif IsPlayerCrouched then
+			warn(Player.Name .. " uncrouched!")
+
+           CrouchEnd()
+		end
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(Key, GameProcessed)
+	if GameProcessed then return end
+	
+	if Key.KeyCode == LeftShift then
+		if IsPlayerRunning then
+			warn(Player.Name .. " has stopped running!")
+			
+			RunningEnd()
+		end
+	end
+end)
+
+UserInputService.JumpRequest:Connect(function()
+	if CanPlayerJump then
+		warn(Player.Name .. " has jumped!")
+		
+		JumpRequest()
+	end
+end)
+
+PlayCutsceneEvent.OnClientEvent:Connect(function()
+	local HumRootPart = Char:FindFirstChild("HumanoidRootPart")
+	HumRootPart.Anchored = true
+	
+	CanPlayerCrouch = false
+	CanPlayerRun = false
+	CanPlayerJump = false
+	
+	RunningEnd()
+	CrouchEnd()
+end)
+
+CutsceneFinished.Event:Connect(function()
+	local HumRootPart = Char:FindFirstChild("HumanoidRootPart")
+	HumRootPart.Anchored = false
+	
+	CanPlayerRun = true
+	CanPlayerCrouch = true
+	CanPlayerJump = true
+	
+end)
+
+local module = {}
+
+return module
